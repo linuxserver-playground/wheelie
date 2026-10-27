@@ -51,11 +51,12 @@ shares one index, and on a filename both releases build, the older one (listed f
 | `distros.json` | The distros, their base images, index names, CPython and libc versions; the arches and runners. |
 | `scripts/gaps.py` | The gap check. `--index-dir docs` reads a checkout, else the Pages index; `--matrix` for the workflow. |
 | `scripts/publish.py` | Picks the built wheels to publish and updates the index pages. |
+| `scripts/migrate.py` | One-off, run locally per index: drops legacy entries that are PyPI copies, re-hosts the rest on the release and repoints them. Done for `alpine-3.24`. |
 | `scripts/build.sh` | One distro and arch: `docker buildx build --output type=local` into `out/`. |
 | `scripts/build-wheels.sh` | Inside the build: one `pip wheel --no-binary <pkg>` per package, with retries. |
 | `scripts/lib.sh` | `retry_ghcr` and `retry`, vendored from `workflows/scripts/lib.sh`; keep them in step. |
 | `Dockerfile` | Build dependencies on the base image; exports `/build` from a scratch stage. |
-| `docs/` | The index pages, served by Pages. Entries from before the move still link `wheels.linuxserver.io`. |
+| `docs/` | The index pages, served by Pages. Entries from before the move still link `wheels.linuxserver.io`, except on `alpine-3.24` (migrated). |
 | `tests/` | Unit tests with PyPI and index fixtures. |
 | `.github/workflows/build.yml` | Gap check, build per distro and arch, publish. |
 | `.github/workflows/pages.yml` | Deploys `docs/` to Pages (on push and when the build calls it). |
