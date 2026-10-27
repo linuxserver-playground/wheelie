@@ -1,0 +1,51 @@
+{
+  "_comment": "One entry per base image the wheels are built on, oldest first within an index (the first build of a shared filename wins). python, libc and libc_version are read from the image (python3 -V, apk list -I musl, ldd --version) and only change when the base image moves to a new release; the gap check reads them from here so it never starts a container.",
+  "distros": {
+    "alpine-3.21": {
+      "image": "ghcr.io/linuxserver-playground/baseimage-alpine:3.21",
+      "index": "alpine-3.21",
+      "python": "3.12",
+      "libc": "musl",
+      "libc_version": "1.2"
+    },
+    "alpine-3.22": {
+      "image": "ghcr.io/linuxserver-playground/baseimage-alpine:3.22",
+      "index": "alpine-3.22",
+      "python": "3.12",
+      "libc": "musl",
+      "libc_version": "1.2"
+    },
+    "alpine-3.23": {
+      "image": "ghcr.io/linuxserver-playground/baseimage-alpine:3.23",
+      "index": "alpine-3.23",
+      "python": "3.12",
+      "libc": "musl",
+      "libc_version": "1.2"
+    },
+    "alpine-3.24": {
+      "image": "ghcr.io/linuxserver-playground/baseimage-alpine:3.24",
+      "index": "alpine-3.24",
+      "python": "3.14",
+      "libc": "musl",
+      "libc_version": "1.2"
+    },
+    "ubuntu-noble": {
+      "image": "ghcr.io/linuxserver-playground/baseimage-ubuntu:noble",
+      "index": "ubuntu",
+      "python": "3.12",
+      "libc": "glibc",
+      "libc_version": "2.39"
+    },
+    "ubuntu-resolute": {
+      "image": "ghcr.io/linuxserver-playground/baseimage-ubuntu:resolute",
+      "index": "ubuntu",
+      "python": "3.14",
+      "libc": "glibc",
+      "libc_version": "2.43"
+    }
+  },
+  "arches": {
+    "amd64": {"platform": "x86_64", "runner": "ubuntu-24.04"},
+    "arm64": {"platform": "aarch64", "runner": "ubuntu-24.04-arm"}
+  }
+}

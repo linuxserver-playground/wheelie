@@ -1,0 +1,13 @@
+{
+ "info": {
+  "name": "bluepy",
+  "version": "1.3.0",
+  "requires_python": ""
+ },
+ "urls": [
+  {
+   "filename": "bluepy-1.3.0.tar.gz",
+   "yanked": false
+  }
+ ]
+}
