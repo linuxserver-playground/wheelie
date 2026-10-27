@@ -1,0 +1,41 @@
+name: Pages
+
+# Serves docs/ (the index pages) at https://linuxserver-playground.github.io/wheelie/.
+# The build calls this after it commits, because its GITHUB_TOKEN push triggers no workflow.
+on:
+  push:
+    branches: [main]
+    paths: [docs/**]
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: wheelie-pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Called from the build: take the commit it just pushed, not the run's own.
+          ref: ${{ github.ref }}
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs
+
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@v5

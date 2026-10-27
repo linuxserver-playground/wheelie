@@ -1,21 +1,19 @@
-ARG DISTRO
-ARG DISTROVER
-ARG ARCH
+# syntax=docker/dockerfile:1
 
-FROM ghcr.io/linuxserver/baseimage-${DISTRO}:${ARCH}-${DISTROVER} AS builder
+# Builds wheels for one distro and arch. Only the artifacts stage is exported (--output type=local), so no
+# image is pushed anywhere. See scripts/build.sh.
+ARG BASE=ghcr.io/linuxserver-playground/baseimage-alpine:3.24
 
-ARG DISTRO
-ARG DISTROVER
-ARG ARCH
+FROM ${BASE} AS builder
+
 ARG PACKAGES
+ARG FIND_LINKS
 
 # grpcio build args
 ARG GRPC_BUILD_WITH_BORING_SSL_ASM=false
-ARG GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=true 
-ARG GRPC_PYTHON_BUILD_WITH_CYTHON=true 
+ARG GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=true
+ARG GRPC_PYTHON_BUILD_WITH_CYTHON=true
 ARG GRPC_PYTHON_DISABLE_LIBC_COMPATIBILITY=true
-
-COPY packages.txt /packages.txt
 
 RUN \
   echo "**** Installing dependencies ****" && \
@@ -60,30 +58,12 @@ RUN \
       python3-dev \
       zlib-dev; \
   fi && \
-  echo "**** Updating pip and building wheels ****" && \
-  if [ "${DISTRO}" = "alpine" ]; then \
-    INDEXDISTRO="${DISTRO}-${DISTROVER}"; \
-  else \
-    INDEXDISTRO="${DISTRO}"; \
-  fi && \
-  python3 -m venv /lsiopy && \
-  pip install -U pip setuptools wheel cython && \
-  mkdir -p /build && \
-  if [ -z "${PACKAGES}" ]; then \
-    PACKAGES=$(cat /packages.txt); \
-  fi && \
-  for PACKAGE in "${PACKAGES}"; do \
-    if echo "${PACKAGE}" | grep -q numpy; then \
-      echo "**** Setting numpy build flag ****" && \
-      BUILD_FLAG='--config-settings=setup-args=-Dallow-noblas=true'; \
-    fi && \
-    echo "**** Building ${PACKAGE} ****" && \
-    pip wheel --wheel-dir=/build --find-links="https://wheel-index.linuxserver.io/${INDEXDISTRO}/" --no-cache-dir -v ${BUILD_FLAG} \
-      ${PACKAGE}; \
-  done && \
-  echo "**** Wheels built are: ****" && \
-  ls /build
+  python3 -m venv /lsiopy
+
+COPY scripts/lib.sh scripts/build-wheels.sh /wheelie/
+
+RUN /wheelie/build-wheels.sh
 
 FROM scratch AS artifacts
 
-COPY --from=builder /build /build
+COPY --from=builder /build /

@@ -1,0 +1,178 @@
+name: Build
+
+# Builds the wheels PyPI does not provide for our base images and publishes them to the index.
+# Dispatched by hand for now; control will dispatch it once it runs the gap check itself.
+on:
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "Packages to build instead of packages.txt (space separated, name or name==version). Ignores our index, not PyPI: builds wherever PyPI has no wheel, and repoints legacy entries at the new build."
+        required: false
+        default: ""
+      distros:
+        description: "Only these distros from distros.json (space separated), e.g. alpine-3.24 ubuntu-noble"
+        required: false
+        default: ""
+      parallel:
+        description: "Most build jobs at once"
+        required: false
+        default: "4"
+
+concurrency:
+  group: wheelie-build
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Gap check
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.gaps.outputs.matrix }}
+      empty: ${{ steps.gaps.outputs.empty }}
+      packages: ${{ steps.gaps.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Find the wheels to build
+        id: gaps
+        env:
+          PACKAGES: ${{ inputs.packages }}
+          DISTROS: ${{ inputs.distros }}
+        run: |
+          args=(--index-dir docs --matrix)
+          if [[ -n "${PACKAGES// }" ]]; then
+            args+=(--packages "${PACKAGES}" --rebuild)
+          fi
+          if [[ -n "${DISTROS// }" ]]; then
+            args+=(--distros "${DISTROS}")
+          fi
+          matrix=$(python3 scripts/gaps.py "${args[@]}")
+          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+          packages=$(jq -r '[.include[].packages | split(" ")[]] | unique | join(" ")' <<< "${matrix}")
+          echo "packages=${packages}" >> "${GITHUB_OUTPUT}"
+          if [[ "$(jq '.include | length' <<< "${matrix}")" == "0" ]]; then
+            echo "empty=true" >> "${GITHUB_OUTPUT}"
+            echo "Nothing to build: PyPI or our index has a wheel for every package, distro and arch." >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "empty=false" >> "${GITHUB_OUTPUT}"
+            {
+              echo "| Distro | Arch | Packages |"
+              echo "| --- | --- | --- |"
+              jq -r '.include[] | "| \(.distro) | \(.arch) | \(.packages) |"' <<< "${matrix}"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+  build:
+    name: ${{ matrix.distro }} ${{ matrix.arch }}
+    needs: plan
+    if: needs.plan.outputs.empty == 'false'
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.parallel || '4') }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR (pull limits)
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build wheels
+        env:
+          IMAGE: ${{ matrix.image }}
+          INDEX: ${{ matrix.index }}
+          PACKAGES: ${{ matrix.packages }}
+        run: ./scripts/build.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.distro }}-${{ matrix.arch }}
+          path: out/*.whl
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish
+    needs: [plan, build]
+    # Publish whatever built, even when a leg failed (the run still shows red). Only main publishes.
+    if: ${{ !cancelled() && needs.plan.outputs.empty == 'false' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          path: wheels
+
+      - name: Choose wheels and update the index pages
+        env:
+          BUILT: ${{ needs.plan.outputs.packages }}
+        run: |
+          mkdir -p wheels
+          python3 scripts/publish.py --wheels wheels --docs docs --repo "${GITHUB_REPOSITORY}" \
+            --built "${BUILT}" --plan upload.tsv
+          {
+            echo "### Published wheels"
+            if [[ -s upload.tsv ]]; then
+              awk -F'\t' '{ n = split($2, p, "/"); print "- `" $1 "` " p[n] }' upload.tsv
+            else
+              echo "None: every wheel built is on PyPI, pure, or already in the index."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source scripts/lib.sh
+          while IFS=$'\t' read -r tag path; do
+            if ! gh release view "${tag}" > /dev/null 2>&1; then
+              retry 3 10 gh release create "${tag}" --target "${GITHUB_SHA}" --latest=false \
+                --title "Wheels for ${tag#index-}" \
+                --notes "Wheels for the ${tag#index-} index: https://linuxserver-playground.github.io/wheelie/${tag#index-}/"
+            fi
+            retry 3 10 gh release upload "${tag}" "${path}" --clobber
+          done < upload.tsv
+
+      - name: Commit the index pages
+        id: commit
+        run: |
+          source scripts/lib.sh
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          git commit -m "Update the wheel indexes [skip ci]"
+          retry 3 10 bash -c 'git pull --rebase origin main && git push origin HEAD:main'
+          echo "changed=true" >> "${GITHUB_OUTPUT}"
+
+  pages:
+    name: Pages
+    needs: publish
+    if: ${{ !cancelled() && needs.publish.outputs.changed == 'true' }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml
